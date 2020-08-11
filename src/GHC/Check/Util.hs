@@ -9,7 +9,7 @@ import           Control.Exception.Safe
 import           Control.Monad.IO.Class (MonadIO(liftIO))
 import           Data.Maybe
 import           Data.Version
-import           GHC (Ghc, gcatch)
+import           GHC (Ghc)
 import           GHC.Exts                   (IsList (fromList), toList)
 import qualified GHC.Paths
 import           Language.Haskell.TH
@@ -24,20 +24,18 @@ instance Lift MyVersion where
 #if MIN_VERSION_template_haskell(2,16,0)
     liftTyped = liftMyVersion
 #endif
-    lift = unTypeQ . liftMyVersion
+    lift = unTypeCode . liftMyVersion
 
-liftMyVersion :: MyVersion -> TExpQ MyVersion
-liftMyVersion ver = do
-    verLifted <- TH.lift (toList ver)
-    [|| fromList $$(pure $ TExp verLifted) ||]
+liftMyVersion :: Quote m => MyVersion -> Code m MyVersion
+liftMyVersion ver = TH.liftTyped ver
 
 #if !MIN_VERSION_template_haskell(2,16,0)
-liftTyped :: Lift a => a -> TExpQ a
+liftTyped :: Lift a => a -> Code m a
 liftTyped = unsafeTExpCoerce . lift
 #endif
 
 gcatchSafe :: forall e a . Exception e => Ghc a -> (e -> Ghc a) -> Ghc a
-gcatchSafe act h = act `gcatch` rethrowAsyncExceptions
+gcatchSafe act h = act `catch` rethrowAsyncExceptions
   where
       rethrowAsyncExceptions :: e -> Ghc a
       rethrowAsyncExceptions e

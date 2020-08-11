@@ -4,6 +4,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE KindSignatures #-}
+
 
 module GHC.Check
   ( -- * GHC version check
@@ -38,8 +41,8 @@ import GHC (Ghc, getSessionDynFlags, runGhc, setSessionDynFlags)
 import GHC.Check.Executable (getGhcVersion, guessExecutablePathFromLibdir)
 import GHC.Check.PackageDb (PackageVersion (..), getPackageVersion, version)
 import GHC.Check.Util (gcatchSafe, liftTyped)
-import Language.Haskell.TH (TExpQ, runIO)
-import Language.Haskell.TH.Syntax (Lift (lift))
+import Language.Haskell.TH (Code, bindCode, TExp, Quote)
+import Language.Haskell.TH.Syntax (Lift (lift), qRunIO, Quasi, examineCode, liftCode, joinCode)
 import System.Directory (doesDirectoryExist, doesFileExist)
 
 -- | Given a run-time libdir, checks the ghc installation and returns
@@ -145,19 +148,22 @@ checkGhcVersion compileTimeVersions runTimeLibdir = do
 --    >              setupGhcApi
 --    >              result <- packageCheck
 --    >              case guessCompatibility result of ...
-makeGhcVersionChecker :: IO FilePath -> TExpQ GhcVersionChecker
-makeGhcVersionChecker getLibdir = do
-  libdir <- runIO getLibdir
-  libdirExists <- runIO $ doesDirectoryExist libdir
-  unless libdirExists
-    $ error
-    $ "I could not find a GHC installation at " <> libdir
-      <> ". Please do a clean rebuild and/or reinstall GHC."
-  compileTimeVersions <-
-    runIO
-      $ runGhcPkg libdir
-      $ collectPackageVersions trackedPackages
-  [||checkGhcVersion $$(liftTyped compileTimeVersions)||]
+makeGhcVersionChecker :: forall (m :: * -> *). (Quasi m, Quote m) => IO FilePath -> Code m GhcVersionChecker
+makeGhcVersionChecker getLibdir =
+  (do
+    libdir <- qRunIO getLibdir
+    libdirExists <- qRunIO $ doesDirectoryExist libdir
+    unless libdirExists
+      $ error
+      $ "I could not find a GHC installation at " <> libdir
+        <> ". Please do a clean rebuild and/or reinstall GHC."
+
+    qRunIO
+        $ runGhcPkg libdir
+        $ collectPackageVersions trackedPackages
+  )
+  `bindCode` \compileTimeVersions ->
+  [||checkGhcVersion compileTimeVersions||]
   where
     trackedPackages = ["ghc", "base"]
 
